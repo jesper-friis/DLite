@@ -457,25 +457,96 @@ int dlite_add_dll_path(void)
  * Managing global state
  ********************************************************************/
 
-#define ERR_STATE_ID "err-globals-id"
-#define ERR_MASK_ID "err-ignored-id"
+#define SHARED_STATE_ID "dlite-shared-state-id"
+#define ERR_STATE_ID "dlite-err-state-id"
+#define ERR_MASK_ID "dlite-err-ignored-id"
 
 
-/* A cache pointing to the current session handler */
-static DLiteGlobals *_globals_handler=NULL;
+/* Shared global state */
+typedef struct {
+  int initialized;           /*!< Whether dlite init has been called */
+  int atexit_called;         /*!< Whether atexit() has been called */
+  int python_atexit_called;  /*!< Whether Python atexit() has been called */
+} SharedState;
 
+/* A cache pointers */
+static DLiteGlobals *_globals_handler = NULL;
+
+
+/* Error handler for DLite. */
+static void dlite_err_handler(const ErrRecord *record)
+{
+  if (!dlite_err_ignored_get(record->eval)) {
+    FILE *stream = err_get_stream();
+    if (stream) fprintf(stream, "** %s\n", record->msg);
+  }
+}
+
+/* Returns a pointer to the shared state. */
+static SharedState *get_shared_state(void)
+{
+  SharedState *shared = dlite_globals_get_state(SHARED_STATE_ID);
+  if (!shared) {
+    if (!(shared = calloc(1, sizeof(SharedState))))
+      errx(dliteMemoryError, "allocation failure");
+    dlite_globals_add_state(SHARED_STATE_ID, shared, free);
+  }
+  return shared;
+}
 
 /* Called by atexit().  Should be ok to call this multiple times... */
-static void _free_globals(void) {
-  Session *s = session_get_default();
-
-  /* Remove the atexit marker state to indicate that we now are in a
-     atexit handler */
-  if (session_get_state(s, ATEXIT_MARKER_ID))
-    session_remove_state(s, ATEXIT_MARKER_ID);
-
-  session_free(s);
+static void _dlite_free(void) {
+  SharedState *shared = get_shared_state();
+  shared->atexit_called = 1;
+  dlite_finalize();
 }
+
+
+/*
+  Initialises DLite. This function may be called several times.
+ */
+void dlite_init(void)
+{
+  SharedState *shared = get_shared_state();
+
+  if (!shared->initialized) {
+    shared->initialized = 1;
+
+    /* Set up global state for utils/err.c */
+    if (!dlite_globals_get_state(ERR_STATE_ID))
+      dlite_globals_add_state(ERR_STATE_ID, err_get_state(), NULL);
+
+    /* Set up error handling */
+    err_set_handler(dlite_err_handler);
+    err_set_nameconv(dlite_errname);
+
+    /* Register atexit handler */
+    atexit(_dlite_free);
+  }
+}
+
+
+/*
+  Finalises DLite. Will be called by atexit().
+
+  This function may be called several times.
+ */
+void dlite_finalize(void)
+{
+  SharedState *shared = get_shared_state();
+
+  /* Reset error handling */
+  err_set_handler(NULL);
+  err_set_nameconv(NULL);
+
+  /* Free the global state */
+  if (!shared->atexit_called || getenv("DLITE_ATEXIT_FREE")) {
+    Session *s = session_get_default();
+    session_free(s);
+  }
+  _globals_handler = NULL;
+}
+
 
 /*
   Returns reference to globals handle.
@@ -485,22 +556,12 @@ DLiteGlobals *dlite_globals_get(void)
   if (!_globals_handler) {
     _globals_handler = session_get_default();
 
-    if (!session_get_state(_globals_handler, ATEXIT_MARKER_ID)) {
-      static void **dummy_ptr=NULL;
-
-      /* Make valgrind and other memory leak detectors happy by freeing
-         up all globals at exit. */
-      atexit(_free_globals);
-
-      /* Add an atexit marker used by dlite_blobals_in_atexit().
-         The value of the state is not used. */
-      session_add_state((Session *)_globals_handler, ATEXIT_MARKER_ID,
-                        &dummy_ptr, NULL);
-    }
+    /* Make sure that DLite is initialised */
+    dlite_init();
   }
-  dlite_init();
   return _globals_handler;
 }
+
 
 /*
   Set globals handle.  Should be called as the first thing by dynamic
@@ -515,37 +576,6 @@ void dlite_globals_set(DLiteGlobals *globals_handler)
   /* Set globals in utils/err.c */
   if ((g = dlite_globals_get_state(ERR_STATE_ID)))
     err_set_state(g);
-}
-
-
-/* Error handler for DLite. */
-static void dlite_err_handler(const ErrRecord *record)
-{
-  if (!dlite_err_ignored_get(record->eval)) {
-    FILE *stream = err_get_stream();
-    if (stream) fprintf(stream, "** %s\n", record->msg);
-  }
-}
-
-
-/*
-  Initialises dlite. This function may be called several times.
- */
-void dlite_init(void)
-{
-  static int initialized = 0;
-
-  if (!initialized) {
-    initialized = 1;
-
-    /* Set up global state for utils/err.c */
-    if (!dlite_globals_get_state(ERR_STATE_ID))
-      dlite_globals_add_state(ERR_STATE_ID, err_get_state(), NULL);
-
-    /* Set up error handling */
-    err_set_handler(dlite_err_handler);
-    err_set_nameconv(dlite_errname);
-  }
 }
 
 
@@ -582,12 +612,32 @@ void *dlite_globals_get_state(const char *name)
   return session_get_state(s, name);
 }
 
+
 /*
   Returns non-zero if we are in an atexit handler.
  */
 int dlite_globals_in_atexit(void)
 {
-  return (dlite_globals_get_state(ATEXIT_MARKER_ID)) ? 0 : 1;
+  SharedState *shared = get_shared_state();
+  return shared->atexit_called;
+}
+
+/*
+  Mark that we are in the Returns non-zero if we are in an atexit handler.
+ */
+void dlite_globals_mark_python_atexit(void)
+{
+  SharedState *shared = get_shared_state();
+  shared->python_atexit_called = 1;
+}
+
+/*
+  Returns non-zero if we are in an atexit handler.
+ */
+int dlite_globals_in_python_atexit(void)
+{
+  SharedState *shared = get_shared_state();
+  return shared->python_atexit_called;
 }
 
 
@@ -612,6 +662,7 @@ DLiteErrMask *_dlite_err_mask_get(void)
   }
   return mask;
 }
+
 
 /* Set mask for error to not print. */
 void _dlite_err_mask_set(DLiteErrMask mask)
