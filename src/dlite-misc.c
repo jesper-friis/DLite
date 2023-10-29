@@ -496,6 +496,10 @@ static SharedState *get_shared_state(void)
 
 /* Called by atexit().  Should be ok to call this multiple times... */
 static void _dlite_free(void) {
+  fflush(stdout);
+  fprintf(stderr, "*** GLOBALS_IN_ATEXIT\n");
+  fflush(stderr);
+
   SharedState *shared = get_shared_state();
   shared->atexit_called = 1;
   dlite_finalize();
@@ -629,6 +633,10 @@ void dlite_globals_mark_python_atexit(void)
 {
   SharedState *shared = get_shared_state();
   shared->python_atexit_called = 1;
+
+  fflush(stdout);
+  fprintf(stderr, "*** MARK_PYTHON_ATEXIT\n");
+  fflush(stderr);
 }
 
 /*

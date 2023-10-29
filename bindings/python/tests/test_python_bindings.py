@@ -67,18 +67,19 @@ def test(verbosity=1, stream=sys.stdout):
         # copy stderr_fd before it is overwritten
         # NOTE: `copied` is inheritable on Windows when duplicating a
         # standard stream
-        with os.fdopen(os.dup(stderr_fd), "wb") as copied:
-            sys.stdout.flush()
-            sys.stderr.flush()
-            try:
-                sys.stdout = devnull
-                os.dup2(dest_fd, stderr_fd)  # $ exec >&dest
-                results = ttr.run(ts)
-            finally:
-                sys.stdout.flush()
-                sys.stderr.flush()
-                sys.stdout = sys.__stdout__
-                os.dup2(copied.fileno(), stderr_fd)  # $ exec >&copied
+        #with os.fdopen(os.dup(stderr_fd), "wb") as copied:
+        #    sys.stdout.flush()
+        #    sys.stderr.flush()
+        #    try:
+        #        sys.stdout = devnull
+        #        os.dup2(dest_fd, stderr_fd)  # $ exec >&dest
+        #        results = ttr.run(ts)
+        #    finally:
+        #        sys.stdout.flush()
+        #        sys.stderr.flush()
+        #        sys.stdout = sys.__stdout__
+        #        os.dup2(copied.fileno(), stderr_fd)  # $ exec >&copied
+        results = ttr.run(ts)
     return results
 
 
