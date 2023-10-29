@@ -79,6 +79,7 @@ def test(verbosity=1, stream=sys.stdout):
         #        sys.stderr.flush()
         #        sys.stdout = sys.__stdout__
         #        os.dup2(copied.fileno(), stderr_fd)  # $ exec >&copied
+        print(f"========= {test} ==========")
         results = ttr.run(ts)
     return results
 
