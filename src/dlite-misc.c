@@ -511,6 +511,7 @@ static void _dlite_free(void) {
  */
 void dlite_init(void)
 {
+  fprintf(stderr, "*** DLITE_INIT\n");
   SharedState *shared = get_shared_state();
 
   if (!shared->initialized) {
@@ -537,6 +538,8 @@ void dlite_init(void)
  */
 void dlite_finalize(void)
 {
+  fprintf(stderr, "*** DLITE_FINALIZE\n");
+
   SharedState *shared = get_shared_state();
 
   /* Reset error handling */
